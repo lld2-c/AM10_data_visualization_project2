@@ -19,7 +19,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-```{r}
+```{r libraries, include=FALSE}
 library(tidyverse)
 library(extrafont)
 library(vroom)
@@ -29,9 +29,13 @@ library(ggrepel)
 library(patchwork)
 library(gghighlight)
 library(skimr)
+library(lubridate) # to handle dates
+library(sf)
+library(here)
+library(tmap)
 ```
 
-```{r}
+```{r, load_data, warning=FALSE, message=FALSE}
 # assuming all your files are within a directory called 'data/stop-search'
 data_dir <- "data/stop-search"
 
@@ -40,26 +44,6 @@ files <- fs::dir_ls(path = data_dir, regexp = "\\.csv$", recurse = TRUE)
 
 #read them all in using vroom::vroom()
 stop_search_data <- vroom(files, id = "source")
-
-# Uncomment the following lines if you want to see how much faster vroom is
-
-# library(microbenchmark)
-# mbm = microbenchmark(
-#   readr =  map_dfr(files, read_csv, .id = "source"),
-#   vroom =  vroom(files, id = "source"),
-#   times=10
-# )
-# mbm
-
-# Unit: milliseconds
-# expr       min        lq      mean    median        uq       max neval cld
-# readr 3676.9319 3761.8027 3944.5699 3791.1760 4055.4460 4626.9870    10   b
-# vroom  855.9414  864.9085  910.1052  905.8456  948.0134  975.8617    10  a 
-
-#read them all in using vroom::vroom()
-stop_search_data <- vroom(files, id = "source")
-
-
 
 # Use janitor to clean names, and add more variables
 stop_search_all <- stop_search_data %>%
@@ -76,7 +60,7 @@ names(stop_search_all)[names(stop_search_all) == 'latitude'] <- 'lat'
 ```
 
 ## Visualization 1
-```{r,fig.width=8, fig.height=3}
+```{r,vis1, warning=FALSE, message=FALSE,fig.width=9, fig.height=3}
 
 #use sf::read_sf() to read in London Wards shapefile
 london_wards_sf <- read_sf(here("data/London-wards-2018_ESRI/London_Ward.shp"))
@@ -85,7 +69,7 @@ london_wards_sf <- read_sf(here("data/London-wards-2018_ESRI/London_Ward.shp"))
 london_wgs84 <-  london_wards_sf %>% 
   st_transform(4326) # transfrom CRS to WGS84, latitude/longitude
 
-westminster_wgs84 <- london_wards_sf %>% 
+city_of_london_wgs84 <- london_wards_sf %>% 
   filter(DISTRICT == "City and County of the City of London") %>% 
   st_transform(4326)
 
@@ -123,12 +107,12 @@ stop_search_offence <- stop_search_all %>%
 # transform points to sf
 stops_sf <- st_as_sf(stop_search_offence%>%select(lng, lat),
                      coords = c('lng',"lat"), 
-                     crs = st_crs(westminster_wgs84))
+                     crs = st_crs(city_of_london_wgs84))
 # intersection of polygons and points
 stop_locations <- stops_sf %>% 
-  mutate(intersection = as.integer(st_intersects(geometry, westminster_wgs84$geometry)),
-         area = if_else(is.na(intersection), '', westminster_wgs84$NAME[intersection]),
-         district = if_else(is.na(intersection), '', westminster_wgs84$DISTRICT[intersection])) 
+  mutate(intersection = as.integer(st_intersects(geometry, city_of_london_wgs84$geometry)),
+         area = if_else(is.na(intersection), '', city_of_london_wgs84$NAME[intersection]),
+         district = if_else(is.na(intersection), '', city_of_london_wgs84$DISTRICT[intersection])) 
 
 # split geometry in coordinates
 stop_locations <- stop_locations%>%
@@ -145,32 +129,105 @@ stop_search_offence_centre <- stop_search_offence %>%
 
 # NB: make sure to transform to a  common CRS. 
 # Here we retrieve and apply the CRS of london_wgs84 
-westminster_stop_search_offence_sf <-  st_as_sf(stop_search_offence_centre, 
+city_of_london_stop_search_offence_sf <-  st_as_sf(stop_search_offence_centre, 
                               coords=c('lng', 'lat'), 
-                              crs=st_crs(westminster_wgs84))
+                              crs=st_crs(city_of_london_wgs84))
 
+set.seed(100)
 ggplot() +
   # draw polygons from London wards shapefile
-  geom_sf(data = westminster_wgs84, fill = "#444444", size = 0.125, colour = "#b2b2b277") +
+  geom_sf(data = city_of_london_wgs84, fill = "#cce6ff", size = 0.125, colour = "#b2b2b277") +
   
   # add points from stop-and-search shapefile
   geom_sf(
-    data = westminster_stop_search_offence_sf, aes(fill = object_of_search), 
+    data = city_of_london_stop_search_offence_sf, aes(fill = object_of_search), 
     color = "white", size = 1.5, alpha = 0.7, shape = 21,
     show.legend = FALSE
   ) +
-  scale_fill_manual(values=c("#ffd966", "#cc0000", "#56B4E9")) +
+  geom_sf_text(data = city_of_london_wgs84[sample(nrow(city_of_london_wgs84), 5), ], 
+               aes(label = NAME), 
+               size = 3,
+               color = "black")+
+  scale_fill_manual(values=c("#e69138", "#cc0000", "#002776")) +
   theme_minimal()+
   coord_sf(datum = NA) + #remove coordinates
   facet_wrap(~object_of_search,strip.position="bottom") +
   labs(title = "Controlled drugs have the most offense cases in stop&search",
-       subtitle = "Locations of Offence in City of London from 2018 to 2021") +
+       subtitle = "Locations of Offence in City of London from 2018 to 2021",
+       x="",
+       y="") +
   theme(axis.text = element_blank()) +
   theme(strip.text = element_text(color = "black", face = "bold", size=11))+
   theme(title = element_text(size=12))+
   NULL
 ```
 
+## Visualization 2
+```{r,vis2, warning=FALSE, message=FALSE,fig.width=9, fig.height=5}
+## what if we wanted to calculate number of offenses in each area in City of London
+temp <- stop_search_offence_centre %>% 
+  group_by(area) %>% 
+  summarise(Count = n())
 
+london_offense_ward <- city_of_london_wgs84 %>%
+  left_join(temp, by=c("NAME" = "area"))
+
+my_scale <- c('#ffffe0', '#93003a')
+
+london_offense_ward %>% 
+  ggplot() +
+  geom_sf(mapping = aes(fill = Count),
+          color = "grey30", size = 0.25) +
+  geom_sf_text(data = city_of_london_wgs84 %>% filter(NAME == "Bishopsgate"|NAME == "Cheap"|NAME == "Bridge"|NAME == "Cordwainer"), 
+               aes(label = NAME), 
+               size = 4,
+               color = "black")+
+  labs(fill = "Count",
+       x="",
+       y="",
+       title = "Bishopsgate is the most dangerous area in City of London",
+       subtitle = "Count of offenses accumulated from 2018 to 2021")+
+  coord_sf(datum = NA) +  
+  scale_fill_gradientn(colours = my_scale)+
+  theme_classic()+
+  theme(
+    # Hide panel borders and remove grid lines
+    panel.border = element_blank())+ 
+  NULL
+```
+
+## Visualization 3
+```{r,vis3, warning=FALSE, message=FALSE, fig.width=9}
+#Compared to Jan-Sept 2020, which areas has seen more offenses in Jan-Sept 2021?
+stop_search_offence_2020 <- stop_search_offence_centre %>% 
+  filter(year == "2020",
+         month %in% (1:9)) %>% 
+  group_by(area) %>% 
+  summarise(count_2020=n()) %>% 
+  rename(a = area)
+
+stop_search_offence_2021 <- stop_search_offence_centre %>% 
+  filter(year == "2021",
+         month %in% (1:9)) %>% 
+  group_by(area) %>% 
+  summarise(count_2021=n())
+
+stop_search_offence_change <- stop_search_offence_2020 %>% 
+  left_join(stop_search_offence_2021, by = c("a" = "area")) %>% 
+  mutate(delta = 100*(count_2021-count_2020)/count_2020)
+
+change <- city_of_london_wgs84 %>%
+  left_join(stop_search_offence_change, by=c("NAME" = "a"))
+
+tmap::tmap_mode("view")
+tmap::tm_shape(change) +
+  tm_polygons("delta",
+              palette = "Reds",
+              title='% change in offenses yearly',
+              title.position = c('right', 'bottom')) + 
+  tm_layout(title= 'Billingsgate has the 300% increase in offense from 2020 to 2021', 
+            title.position = c('right', 'top'),
+            legend.position = c("left","bottom"))
+```
 
 
