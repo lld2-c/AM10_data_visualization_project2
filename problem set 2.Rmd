@@ -1,0 +1,176 @@
+---
+title: "problem set 2"
+output: html_document
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE, 
+  warning = FALSE, 
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+options(digits = 3)
+
+# default figure size
+knitr::opts_chunk$set(
+  fig.width=6.75, 
+  fig.height=6.75,
+  fig.align = "center"
+)
+```
+
+```{r}
+library(tidyverse)
+library(extrafont)
+library(vroom)
+library(ggtext)
+library(gapminder)
+library(ggrepel)
+library(patchwork)
+library(gghighlight)
+library(skimr)
+```
+
+```{r}
+# assuming all your files are within a directory called 'data/stop-search'
+data_dir <- "data/stop-search"
+
+files <- fs::dir_ls(path = data_dir, regexp = "\\.csv$", recurse = TRUE) 
+#recurse=TRUE will recursively look for files further down into any folders
+
+#read them all in using vroom::vroom()
+stop_search_data <- vroom(files, id = "source")
+
+# Uncomment the following lines if you want to see how much faster vroom is
+
+# library(microbenchmark)
+# mbm = microbenchmark(
+#   readr =  map_dfr(files, read_csv, .id = "source"),
+#   vroom =  vroom(files, id = "source"),
+#   times=10
+# )
+# mbm
+
+# Unit: milliseconds
+# expr       min        lq      mean    median        uq       max neval cld
+# readr 3676.9319 3761.8027 3944.5699 3791.1760 4055.4460 4626.9870    10   b
+# vroom  855.9414  864.9085  910.1052  905.8456  948.0134  975.8617    10  a 
+
+#read them all in using vroom::vroom()
+stop_search_data <- vroom(files, id = "source")
+
+
+
+# Use janitor to clean names, and add more variables
+stop_search_all <- stop_search_data %>%
+  janitor::clean_names() %>% 
+  mutate(month = month(date),
+         month_name = month(date, label=TRUE, abbr = TRUE),
+         year= year(date),
+         month_year = paste0(year, "-",month_name)
+  ) 
+
+# rename longitude/latitude to lng/lat
+names(stop_search_all)[names(stop_search_all) == 'longitude'] <- 'lng'
+names(stop_search_all)[names(stop_search_all) == 'latitude'] <- 'lat'
+```
+
+## Visualization 1
+```{r,fig.width=8}
+
+#use sf::read_sf() to read in London Wards shapefile
+london_wards_sf <- read_sf(here("data/London-wards-2018_ESRI/London_Ward.shp"))
+
+# transfrom CRS to 4326, or pairs of latitude/longitude numbers
+london_wgs84 <-  london_wards_sf %>% 
+  st_transform(4326) # transfrom CRS to WGS84, latitude/longitude
+
+westminster_wgs84 <- london_wards_sf %>% 
+  filter(DISTRICT == "City and County of the City of London") %>% 
+  st_transform(4326)
+
+# concentrate in top three searches, age_ranges, and officer defined ethnicities
+which_searches <- c("Stolen goods", "Controlled drugs", "Offensive weapons")
+which_ages <- c("10-17", "18-24","25-34", "over 34")
+which_ethnicity <- c("White", "Black", "Asian")
+
+stop_search_offence <- stop_search_all %>% 
+  
+  # filter out stop-and-search where no further action was taken
+  filter(outcome != "A no further action disposal") %>% 
+  
+  #filter out  rows with no latitude/longitude
+  filter(!is.na(lng)) %>% 
+  filter(!is.na(lat)) %>% 
+  
+  # concentrate in top searches, age_ranges, and officer defined ethnicities
+  filter(object_of_search %in% which_searches) %>% 
+  filter(age_range %in% which_ages) %>% 
+  filter(officer_defined_ethnicity %in% which_ethnicity) %>% 
+  
+  # only select the area in city of London borrow
+  
+  # relevel factors so everything appears in correct order
+  mutate(
+    object_of_search = fct_relevel(object_of_search, 
+                                   c("Stolen goods", "Controlled drugs", "Offensive weapons")), 
+    age_range = fct_relevel(age_range, 
+                            c( "10-17","18-24", "25-34", "over 34")), 
+    officer_defined_ethnicity = fct_relevel(officer_defined_ethnicity, 
+                                            c("White", "Black", "Asian"))
+  )
+
+# transform points to sf
+stops_sf <- st_as_sf(stop_search_offence%>%select(lng, lat),
+                     coords = c('lng',"lat"), 
+                     crs = st_crs(westminster_wgs84))
+# intersection of polygons and points
+stop_locations <- stops_sf %>% 
+  mutate(intersection = as.integer(st_intersects(geometry, westminster_wgs84$geometry)),
+         area = if_else(is.na(intersection), '', westminster_wgs84$NAME[intersection]),
+         district = if_else(is.na(intersection), '', westminster_wgs84$DISTRICT[intersection])) 
+
+# split geometry in coordinates
+stop_locations <- stop_locations%>%
+  mutate(X= st_coordinates(geometry)[,1],
+         Y= st_coordinates(geometry)[,2])
+
+# append areas and borough to stop search
+stop_search_offence$area <- stop_locations$area
+stop_search_offence$district <- stop_locations$district
+stop_search_offence$geometry <- stop_locations$geometry
+
+stop_search_offence_centre <- stop_search_offence %>% 
+  filter(area != "")
+
+# NB: make sure to transform to a  common CRS. 
+# Here we retrieve and apply the CRS of london_wgs84 
+westminster_stop_search_offence_sf <-  st_as_sf(stop_search_offence_centre, 
+                              coords=c('lng', 'lat'), 
+                              crs=st_crs(westminster_wgs84))
+
+ggplot() +
+  # draw polygons from London wards shapefile
+  geom_sf(data = westminster_wgs84, fill = "#444444", size = 0.125, colour = "#b2b2b277") +
+  
+  # add points from stop-and-search shapefile
+  geom_sf(
+    data = westminster_stop_search_offence_sf, aes(fill = object_of_search), 
+    color = "white", size = 1.5, alpha = 0.7, shape = 21,
+    show.legend = FALSE
+  ) +
+  scale_fill_manual(values=c("#ffd966", "#cc0000", "#56B4E9")) +
+  theme_minimal()+
+  coord_sf(datum = NA) + #remove coordinates
+  facet_wrap(~object_of_search,strip.position="bottom") +
+  labs(title = "Controlled drugs have the most offense cases in stop&search",
+       subtitle = "Locations of Offence in City of London from 2018 to 2021") +
+  theme(axis.text = element_blank()) +
+  theme(strip.text = element_text(color = "black", face = "bold", size=11))+
+  theme(title = element_text(size=12))+
+  NULL
+```
+
+
+
+
