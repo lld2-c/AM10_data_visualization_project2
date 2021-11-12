@@ -76,7 +76,7 @@ names(stop_search_all)[names(stop_search_all) == 'latitude'] <- 'lat'
 ```
 
 ## Visualization 1
-```{r,fig.width=8}
+```{r,fig.width=8, fig.height=3}
 
 #use sf::read_sf() to read in London Wards shapefile
 london_wards_sf <- read_sf(here("data/London-wards-2018_ESRI/London_Ward.shp"))
