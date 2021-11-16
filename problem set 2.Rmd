@@ -232,17 +232,20 @@ tmap::tm_shape(change) +
 memo:
 
 - What story are you telling with your visualizations?
+
 I tried to deliver to the audience what are the most condensed offense boroughs in central london, and the main types of offense (controlled drugs, offensive weapons, stolen goods). The first graph will provide the audience a clue of where are the spots they should beware of. 
 The second visualization is trying to tell the audience that over the years, which borough has the most cases of offense. It shows that one area (Bishopsgate) is the most dangerous one.
 However, since number of offense cases keep changing over the years, it's necessary to see which areas has increased crime than others. And with visualization 3 we found that Bishopsgate has decreased crime, but high number of crimes. In comparison, though billingsgate has low number of crimes, it has risen 300% over the past year. Therefore, the audience need to beware of billingsgate on top of bishopsgate. 
 
 - How do you apply the principles of C.R.A.P?
+
 The color contrast of map background, the dots and text labels are high enough for audience to visualize. 
 There are repeated plots for each category of offense in the first visualization.
 Alignment is in place since the titles and subtitles are aligned to the far left.
 Proximity is in place since the plots grouped by categories of offense. 
 
 - How did you apply Alberto Cairo's five qualities of great visualizations?
+
 Trustful - for the 3rd visualization, I purposefully chose the jan-oct data for 2020, instead of the whole year of 2020, in order to remain truthful to compare with the data in 2021, since only the first 10 months of data are available. 
 Functional - graphs are all conveying the intended message without over-simplifying the graph. 
 Beautiful - for all the graphs, I customized the color palettes to make it fun to read.
